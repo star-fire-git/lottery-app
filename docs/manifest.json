@@ -1,9 +1,0 @@
-{
-    "name": "彩票中奖查询",
-    "short_name": "彩票查询",
-    "start_url": ".",
-    "display": "standalone",
-    "theme_color": "#E53E3E",
-    "background_color": "#ffffff",
-    "icons": []
-}
