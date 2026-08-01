@@ -668,8 +668,15 @@
             /* 快乐八：同步号码网格高亮（输入框数量 = 当前行的玩法选号数） */
             syncGridHighlight('betKl8Grid', 'k', ()=>getActiveInputs(), 0, cfg.redCount);
         }
-        /* 当前行未锁定时用户修改了输入 → 上一次的命中高亮已过时，自动清除 */
-        if (!isActiveRowLocked()) clearBetHighlights();
+        /* 当前行未锁定时用户修改了输入 → 仅清除本行命中高亮，不影响其他已锁定行 */
+        if (!isActiveRowLocked()) {
+            const row = getRowElement(activeRow);
+            if (row) {
+                row.querySelectorAll('input.bet-hit, input.bet-miss').forEach(inp => {
+                    inp.classList.remove('bet-hit', 'bet-miss');
+                });
+            }
+        }
     }
 
     // ==================== 行级锁定 / 解锁 ====================
