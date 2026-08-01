@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>彩票中奖查询</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#E53E3E">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        /* ========== 通用 ========== */
+        body { background: #f8f9fa; }
+        .container { max-width: 600px; }
+
+        /* ========== 彩种切换 ========== */
+        .type-tab {
+            flex: 1; text-align: center; padding: 10px;
+            cursor: pointer; border-radius: 8px 8px 0 0;
+            background: #e9ecef; color: #6c757d; font-weight: bold;
+            transition: all .2s;
+        }
+        .type-tab.active { background: #fff; color: #E53E3E; box-shadow: 0 -2px 6px rgba(0,0,0,.06); }
+        .type-tab.kl8.active { color: #DD6B20; }
+
+        /* ========== 卡片 ========== */
+        .section-card { background: #fff; border-radius: 0 0 12px 12px; padding: 16px; margin-bottom: 12px;
+                        box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+        .section-title { font-size: .95rem; font-weight: bold; color: #333; margin-bottom: 10px;
+                         display: flex; align-items: center; gap: 6px; }
+        .section-badge { font-size: .75rem; background: #FFF3CD; color: #856404; padding: 2px 8px;
+                         border-radius: 10px; }
+
+        /* ========== 数字球（通用） ========== */
+        .num-ball {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 38px; height: 38px; border-radius: 50%; font-size: 14px; font-weight: bold;
+            cursor: pointer; user-select: none; transition: all .12s;
+            border: 2px solid transparent; margin: 2px;
+        }
+        .num-ball:hover { transform: scale(1.12); }
+
+        /* 红球 */
+        .ball-r { background: #FFF5F5; color: #C53030; border-color: #FEB2B2; }
+        .ball-r.sel { background: #E53E3E; color: #fff; border-color: #C53030;
+                      box-shadow: 0 0 6px rgba(229,62,62,.4); }
+        /* 蓝球 */
+        .ball-b { background: #EBF8FF; color: #2B6CB0; border-color: #90CDF4; }
+        .ball-b.sel { background: #3182CE; color: #fff; border-color: #2B6CB0;
+                      box-shadow: 0 0 6px rgba(49,130,206,.4); }
+        /* 快乐八球 */
+        .ball-k { background: #FFF8F0; color: #C05621; border-color: #FBD38D; }
+        .ball-k.sel { background: #DD6B20; color: #fff; border-color: #C05621;
+                      box-shadow: 0 0 6px rgba(221,107,32,.4); }
+
+        /* 网格 */
+        .ball-grid { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; }
+        .ball-grid-80 { max-width: 420px; margin: 0 auto; }
+
+        /* 移动端缩小 */
+        @media (max-width: 480px) {
+            .num-ball { width: 30px; height: 30px; font-size: 12px; margin: 1px; }
+            .ball-grid-80 { max-width: 320px; }
+        }
+
+        /* ========== 投注行输入框 ========== */
+        .bet-inp { width: 46px !important; text-align: center; padding: 2px 1px; font-size: 13px; }
+        .bet-row-wrap { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 0;
+                        border-bottom: 1px dashed #eee; }
+        .bet-row-wrap:last-child { border-bottom: none; }
+        .bet-row-num { font-weight: bold; font-size: .85rem; white-space: nowrap; }
+        .bet-row-wrap.active-row { background: #FFFBEB; border-radius: 6px; margin: 0 -8px; padding: 6px 8px; }
+
+        /* ========== 玩法按钮 ========== */
+        .play-btn {
+            font-size: .72rem; padding: 2px 8px; border-radius: 12px; cursor: pointer;
+            background: #FFF8F0; color: #C05621; border: 1px solid #FBD38D; transition: all .15s;
+        }
+        .play-btn:hover { background: #FEEBC8; }
+        .play-btn.active { background: #DD6B20; color: #fff; border-color: #C05621; }
+
+        /* ========== 结果 ========== */
+        .result-line { border-left: 4px solid #dee2e6; padding: 8px 12px; margin: 6px 0;
+                       border-radius: 0 6px 6px 0; transition: border-color .3s; }
+        .result-line.win { border-left-color: #38A169; background: #F0FFF4; }
+
+        /* ========== 按钮 ========== */
+        .btn-calc { width: 100%; font-size: 1.1rem; font-weight: bold; padding: 12px; }
+
+        /* ========== Toast 轻提示（顶部居中弹出，2 秒自动消失） ========== */
+        #toast {
+            position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+            background: rgba(220, 53, 69, 0.92); color: #fff; padding: 10px 22px;
+            border-radius: 24px; font-size: .9rem; z-index: 9999;
+            opacity: 0; transition: opacity .3s; pointer-events: none;
+            white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,.15);
+        }
+        #toast.show { opacity: 1; }
+
+        /* ========== 脉冲动画（提示用户哪些球已选中） ========== */
+        .num-ball.pulse {
+            animation: pulse-bounce .45s ease-in-out 3;
+        }
+        @keyframes pulse-bounce {
+            0%, 100% { transform: scale(1); }
+            50%      { transform: scale(1.25); box-shadow: 0 0 0 6px rgba(229,62,62,0); }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container py-3">
+    <h4 class="text-center mb-2">🎰 彩票中奖查询</h4>
+
+    <!-- Toast 提示条（默认隐藏，JS 控制显隐） -->
+    <div id="toast"></div>
+
+    <!-- ==================== 彩种切换 ==================== -->
+    <div class="d-flex">
+        <div class="type-tab active" id="tabSsq" onclick="switchType('SSQ')">双色球</div>
+        <div class="type-tab kl8" id="tabKl8" onclick="switchType('KL8')">快乐八</div>
+    </div>
+
+    <div class="section-card">
+        <!-- ========== 一、开奖号码 ========== -->
+        <div class="section-title">
+            📊 开奖号码
+            <span class="section-badge">手动输入</span>
+            <small class="text-muted ms-auto" id="drawHint">请点击下方球号</small>
+        </div>
+        <div class="text-center mb-2" id="drawSummary" style="min-height:28px;"></div>
+
+        <!-- SSQ 开奖选择器 -->
+        <div id="drawSsq">
+            <div class="small text-danger fw-bold mb-1">🔴 红球（选 6 个）</div>
+            <div class="ball-grid" id="drawRedGrid"></div>
+            <div class="small text-primary fw-bold mb-1 mt-2">🔵 蓝球（选 1 个）</div>
+            <div class="ball-grid" id="drawBlueGrid"></div>
+        </div>
+        <!-- KL8 开奖选择器（80球） -->
+        <div id="drawKl8" style="display:none;">
+            <div class="small text-orange fw-bold mb-1" style="color:#DD6B20;">🟠 开奖号码（选 20 个，从 1-80 中）</div>
+            <div class="ball-grid ball-grid-80" id="drawKl8Grid"></div>
+        </div>
+
+        <div class="text-center mt-2">
+            <button class="btn btn-outline-secondary btn-sm" onclick="clearDraw()">🔄 清空</button>
+            <button class="btn btn-outline-info btn-sm ms-1" onclick="randomDraw()">🎲 随机生成</button>
+        </div>
+
+        <!-- ========== 二、投注号码 ========== -->
+        <hr class="my-3">
+        <div class="section-title">📝 我的投注</div>
+
+        <!-- 快乐八玩法选择 -->
+        <div id="kl8PlayBar" style="display:none;" class="mb-2">
+            <div class="d-flex align-items-center gap-1 flex-wrap">
+                <small class="fw-bold text-secondary">玩法：</small>
+                <div id="playBtns"></div>
+            </div>
+        </div>
+
+        <!-- 投注行 -->
+        <div id="betRows"></div>
+
+        <div class="mt-2 d-flex gap-2 flex-wrap">
+            <button class="btn btn-outline-secondary btn-sm" onclick="addBetRow()">+ 添加一注</button>
+            <button class="btn btn-outline-danger btn-sm" onclick="removeActiveRow()">🗑 删除当前注</button>
+            <button class="btn btn-outline-info btn-sm" onclick="randomActiveBet()">🎲 随机一注</button>
+        </div>
+
+        <!-- 投注选号网格 -->
+        <div class="mt-2" id="betSelectorGrid"></div>
+
+        <!-- ========== 三、计算 ========== -->
+        <hr class="my-3">
+        <button class="btn btn-danger btn-calc" onclick="calc()">
+            🎯 计算中奖
+        </button>
+
+        <!-- ========== 四、结果 ========== -->
+        <div class="mt-3" id="resultArea" style="display:none;"></div>
+
+        <!-- ========== 五、规则 ========== -->
+        <hr class="my-3">
+        <details>
+            <summary class="section-title" style="cursor:pointer; display:inline;">📋 玩法规则</summary>
+            <table class="table table-sm table-bordered small mt-2">
+                <tbody id="rulesBody"></tbody>
+            </table>
+        </details>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    /* =================================================================
+     *  彩票中奖查询 —— 纯手动版
+     *  无任何 API 调用，无服务器依赖，部署到 GitHub Pages 即可使用
+     *  ================================================================= */
+
+    // ==================== 全局状态 ====================
+    let type = 'SSQ';                     // 当前彩种
+    let kl8Play = 'x10';                 // 快乐八玩法
+    let activeRow = 0;                   // 当前激活的投注行
+
+    // 开奖号码（用户手动选中的）
+    let drawRed = [];                    // SSQ 红球 / KL8 开奖号码
+    let drawBlue = null;                // SSQ 蓝球（KL8 为 null）
+
+    // SSQ 常量
+    const SSQ_RED_MAX = 33, SSQ_BLUE_MAX = 16, SSQ_RED_PICK = 6, SSQ_BLUE_PICK = 1;
+    // KL8 常量
+    const KL8_MAX = 80, KL8_DRAW_COUNT = 20;
+
+    // 快乐八玩法定义
+    const KL8_STYLES = [
+        {code:'x1',  name:'选一', pick:1,  tiers:[{m:1,level:'一等奖',amount:'4.6元'}]},
+        {code:'x2',  name:'选二', pick:2,  tiers:[{m:2,level:'一等奖',amount:'19元'}]},
+        {code:'x3',  name:'选三', pick:3,  tiers:[{m:3,level:'一等奖',amount:'53元'},{m:2,level:'二等奖',amount:'3元'}]},
+        {code:'x4',  name:'选四', pick:4,  tiers:[{m:4,level:'一等奖',amount:'100元'},{m:3,level:'二等奖',amount:'5元'},{m:2,level:'三等奖',amount:'3元'}]},
+        {code:'x5',  name:'选五', pick:5,  tiers:[{m:5,level:'一等奖',amount:'1000元'},{m:4,level:'二等奖',amount:'20元'},{m:3,level:'三等奖',amount:'3元'}]},
+        {code:'x6',  name:'选六', pick:6,  tiers:[{m:6,level:'一等奖',amount:'3000元'},{m:5,level:'二等奖',amount:'30元'},{m:4,level:'三等奖',amount:'10元'},{m:3,level:'四等奖',amount:'3元'}]},
+        {code:'x7',  name:'选七', pick:7,  tiers:[{m:7,level:'一等奖',amount:'10000元'},{m:6,level:'二等奖',amount:'288元'},{m:5,level:'三等奖',amount:'28元'},{m:4,level:'四等奖',amount:'4元'},{m:0,level:'五等奖',amount:'2元'}]},
+        {code:'x8',  name:'选八', pick:8,  tiers:[{m:8,level:'一等奖',amount:'50000元'},{m:7,level:'二等奖',amount:'800元'},{m:6,level:'三等奖',amount:'88元'},{m:5,level:'四等奖',amount:'10元'},{m:4,level:'五等奖',amount:'3元'},{m:0,level:'六等奖',amount:'2元'}]},
+        {code:'x9',  name:'选九', pick:9,  tiers:[{m:9,level:'一等奖',amount:'浮动（约30万）'},{m:8,level:'二等奖',amount:'2000元'},{m:7,level:'三等奖',amount:'200元'},{m:6,level:'四等奖',amount:'20元'},{m:5,level:'五等奖',amount:'5元'},{m:4,level:'六等奖',amount:'3元'},{m:0,level:'七等奖',amount:'2元'}]},
+        {code:'x10',name:'选十', pick:10, tiers:[{m:10,level:'一等奖',amount:'浮动（最高500万）'},{m:9,level:'二等奖',amount:'8000元'},{m:8,level:'三等奖',amount:'800元'},{m:7,level:'四等奖',amount:'80元'},{m:6,level:'五等奖',amount:'5元'},{m:5,level:'六等奖',amount:'3元'},{m:0,level:'七等奖',amount:'2元'}]}
+    ];
+
+    // ==================== 工具函数 ====================
+    /** 生成不重复随机数 */
+    function randomNums(count, max) {
+        const set = new Set();
+        while (set.size < count) set.add(Math.floor(Math.random() * max) + 1);
+        return [...set].sort((a,b)=>a-b);
+    }
+
+    // ==================== Toast 提示 ====================
+    let toastTimer = null;
+
+    /**
+     * 底部浮层提示条，2 秒自动消失。
+     * 适合非阻断型提示：告知用户操作无效的原因，但不打断操作流。
+     */
+    function showToast(msg) {
+        const el = document.getElementById('toast');
+        el.textContent = msg;
+        el.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => el.classList.remove('show'), 2000);
+    }
+
+    /**
+     * 闪烁指定网格中所有已选中（class="sel"）的球，
+     * 引导用户看到哪些号码已被选，便于决定取消哪一个。
+     */
+    function pulseSelectedBalls(gridId) {
+        const grid = document.getElementById(gridId);
+        if (!grid) return;
+        grid.querySelectorAll('.num-ball.sel').forEach(b => {
+            b.classList.add('pulse');
+            setTimeout(() => b.classList.remove('pulse'), 1500); // 动画结束后移除 class
+        });
+    }
+
+    // ==================== 开奖号码操作 ====================
+    function clearDraw() { drawRed = []; drawBlue = null; renderAll(); }
+    function randomDraw() {
+        if (type === 'SSQ') {
+            drawRed = randomNums(SSQ_RED_PICK, SSQ_RED_MAX);
+            drawBlue = Math.floor(Math.random() * SSQ_BLUE_MAX) + 1;
+        } else {
+            drawRed = randomNums(KL8_DRAW_COUNT, KL8_MAX);
+            drawBlue = null;
+        }
+        renderAll();
+    }
+
+    /**
+     * 点击开奖号码球 —— 选中 / 取消选中
+     * @param {number} num 被点击的球号
+     * @param {boolean} isBlue 是否蓝球（双色球专用）
+     *
+     * 规则：
+     *   - 蓝球：单选切换，只保留一个
+     *   - 红球/主号码：
+     *       已选中 → 取消
+     *       未选中 → 加入。但如果已达上限，弹 toast 提示，**不自动删除已有号码**
+     */
+    function clickDrawBall(num, isBlue) {
+        if (isBlue) {
+            // 蓝球：点击同一个取消，点击另一个替换
+            drawBlue = (drawBlue === num) ? null : num;
+        } else {
+            const idx = drawRed.indexOf(num);
+            if (idx >= 0) {
+                // 已选中 → 取消选中
+                drawRed.splice(idx, 1);
+            } else {
+                /* 双色球红球已达上限 6 个：弹提示 + 闪烁已选球，不自动踢 */
+                if (type === 'SSQ' && drawRed.length >= SSQ_RED_PICK) {
+                    showToast('🔴 红球已选满 ' + SSQ_RED_PICK + ' 个，请先点击已选号码取消后再选');
+                    pulseSelectedBalls('drawRedGrid');
+                    return;
+                }
+                /* 快乐八已达上限 20 个：同样弹提示 */
+                if (type === 'KL8' && drawRed.length >= KL8_DRAW_COUNT) {
+                    showToast('🟠 已选满 ' + KL8_DRAW_COUNT + ' 个开奖号码，请先取消一个');
+                    pulseSelectedBalls('drawKl8Grid');
+                    return;
+                }
+                // 未达上限 → 加入并按升序排列
+                drawRed.push(num);
+                drawRed.sort((a, b) => a - b);
+            }
+        }
+        renderAll();
+    }
+
+    // ==================== 投注行管理 ====================
+    function getBetConfig() {
+        if (type === 'SSQ') return { redCount:6, blueCount:1, maxRed:33, maxBlue:16 };
+        const s = KL8_STYLES.find(x=>x.code===kl8Play) || KL8_STYLES[9];
+        return { redCount:s.pick, blueCount:0, maxRed:80, maxBlue:0 };
+    }
+
+    function addBetRow() {
+        const rows = document.querySelectorAll('.bet-row-wrap');
+        const idx = rows.length;
+        const cfg = getBetConfig();
+        let html = '<div class="bet-row-wrap" data-row="' + idx + '" onclick="setActive(' + idx + ')">';
+        html += '<span class="bet-row-num">第' + (idx+1) + '注</span>';
+        for (let i = 0; i < cfg.redCount; i++) {
+            html += '<input class="form-control bet-inp" type="number" min="1" max="' + cfg.maxRed
+                 + '" placeholder="' + (cfg.blueCount?'红':'号') + '" onfocus="setActive(' + idx + ')" oninput="syncBetUI()">';
+        }
+        if (cfg.blueCount) {
+            html += '<span class="text-primary fw-bold">+</span>';
+            html += '<input class="form-control bet-inp" type="number" min="1" max="' + cfg.maxBlue
+                 + '" placeholder="蓝" onfocus="setActive(' + idx + ')" oninput="syncBetUI()"'
+                 + ' style="border-color:#90CDF4;">';
+        }
+        html += '</div>';
+        document.getElementById('betRows').insertAdjacentHTML('beforeend', html);
+        setActive(idx);
+    }
+
+    function removeActiveRow() {
+        const rows = document.querySelectorAll('.bet-row-wrap');
+        if (rows.length <= 1) { alert('至少保留一注'); return; }
+        const target = document.querySelector('.bet-row-wrap[data-row="' + activeRow + '"]');
+        if (target) target.remove();
+        renumberRows();
+        if (activeRow >= document.querySelectorAll('.bet-row-wrap').length)
+            activeRow = Math.max(0, document.querySelectorAll('.bet-row-wrap').length - 1);
+        setActive(activeRow);
+    }
+
+    function setActive(idx) {
+        activeRow = idx;
+        document.querySelectorAll('.bet-row-wrap').forEach(r=>r.classList.remove('active-row'));
+        const row = document.querySelector('.bet-row-wrap[data-row="' + idx + '"]');
+        if (row) row.classList.add('active-row');
+        renderBetGrid();
+    }
+
+    function renumberRows() {
+        document.querySelectorAll('.bet-row-wrap').forEach((r,i) => {
+            r.dataset.row = i;
+            r.querySelector('.bet-row-num').textContent = '第' + (i+1) + '注';
+        });
+    }
+
+    /** 获取当前激活行的输入框 */
+    function getActiveInputs() {
+        const row = document.querySelector('.bet-row-wrap[data-row="' + activeRow + '"]');
+        return row ? row.querySelectorAll('input') : [];
+    }
+
+    /** 填充当前行*/
+    function fillActiveRow(nums) {
+        const inputs = getActiveInputs();
+        if (!inputs.length) return;
+        // 先清空
+        inputs.forEach(inp => inp.value = '');
+        nums.forEach((n, i) => { if (i < inputs.length) inputs[i].value = n; });
+        syncBetUI();
+    }
+
+    function randomActiveBet() {
+        const cfg = getBetConfig();
+        const reds = randomNums(cfg.redCount, cfg.maxRed);
+        if (cfg.blueCount) reds.push(randomNums(1, cfg.maxBlue)[0]);
+        fillActiveRow(reds);
+    }
+
+    // ==================== 投注选号网格 ====================
+    function renderBetGrid() {
+        const container = document.getElementById('betSelectorGrid');
+        const cfg = getBetConfig();
+        if (type === 'SSQ') {
+            container.innerHTML =
+                '<div class="small text-danger fw-bold mb-1">🔴 红球 1-33（点击填入当前注）</div>'
+                + '<div class="ball-grid" id="betRedGrid"></div>'
+                + '<div class="small text-primary fw-bold mb-1 mt-2">🔵 蓝球 1-16（点击填入当前注）</div>'
+                + '<div class="ball-grid" id="betBlueGrid"></div>';
+            buildGrid('betRedGrid', 1, 33, 'r', (n) => clickBetBall(n, false));
+            buildGrid('betBlueGrid', 1, 16, 'b', (n) => clickBetBall(n, true));
+        } else {
+            container.innerHTML =
+                '<div class="small fw-bold mb-1" style="color:#DD6B20;">🟠 号码 1-80（点击填入当前注）</div>'
+                + '<div class="ball-grid ball-grid-80" id="betKl8Grid"></div>';
+            buildGrid('betKl8Grid', 1, 80, 'k', (n) => clickBetBall(n, false));
+        }
+        syncBetUI();
+    }
+
+    function clickBetBall(num, isBlue) {
+        const inputs = getActiveInputs();
+        if (!inputs.length) return;
+        const cfg = getBetConfig();
+        if (isBlue) {
+            // 蓝球单选
+            const blueIdx = cfg.redCount;
+            if (blueIdx < inputs.length) {
+                inputs[blueIdx].value = (parseInt(inputs[blueIdx].value) === num) ? '' : num;
+            }
+        } else {
+            // 主号码：已选中则移除，否则填入首个空位
+            let existIdx = -1;
+            inputs.forEach((inp, i) => {
+                if (cfg.blueCount && i >= cfg.redCount) return;
+                if (parseInt(inp.value) === num) existIdx = i;
+            });
+            if (existIdx >= 0) {
+                inputs[existIdx].value = '';
+                // 前移后续值
+                const limit = cfg.blueCount ? cfg.redCount : inputs.length;
+                for (let i = existIdx; i < limit - 1; i++) inputs[i].value = inputs[i + 1].value;
+                if (limit - 1 < inputs.length) inputs[limit - 1].value = '';
+            } else {
+                for (const inp of inputs) {
+                    if (cfg.blueCount && Array.from(inputs).indexOf(inp) >= cfg.redCount) break;
+                    if (!inp.value) { inp.value = num; break; }
+                }
+            }
+        }
+        syncBetUI();
+    }
+
+    /** 同步网格高亮 */
+    function syncBetUI() {
+        if (type === 'SSQ') syncGridHighlight('betRedGrid', 'r', ()=>getActiveInputs(), 0, 6);
+        else syncGridHighlight('betKl8Grid', 'k', ()=>getActiveInputs(), 0, getBetConfig().redCount);
+    }
+
+    // ==================== 渲染引擎 ====================
+    /** 渲染全部 UI */
+    function renderAll() {
+        // 开奖网格
+        renderDrawGrids();
+        renderDrawSummary();
+        // 投注区
+        renderKl8PlayBar();
+        renderBetGrid();
+        renderRules();
+        // 清空结果
+        document.getElementById('resultArea').style.display = 'none';
+        document.getElementById('resultArea').innerHTML = '';
+    }
+
+    function renderDrawGrids() {
+        // SSQ 开奖网格
+        buildGrid('drawRedGrid', 1, SSQ_RED_MAX, 'r', (n) => clickDrawBall(n, false));
+        buildGrid('drawBlueGrid', 1, SSQ_BLUE_MAX, 'b', (n) => clickDrawBall(n, true));
+        // KL8 开奖网格
+        buildGrid('drawKl8Grid', 1, KL8_MAX, 'k', (n) => clickDrawBall(n, false));
+    }
+
+    function buildGrid(id, from, to, cls, onClick) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.innerHTML = '';
+        for (let n = from; n <= to; n++) {
+            const b = document.createElement('span');
+            b.className = 'num-ball ball-' + cls;
+            b.textContent = n;
+            b.onclick = () => onClick(n);
+            // 高亮
+            if (id.startsWith('draw')) {
+                if (cls === 'b') { if (drawBlue === n) b.classList.add('sel'); }
+                else { if (drawRed.includes(n)) b.classList.add('sel'); }
+            }
+            el.appendChild(b);
+        }
+    }
+
+    function renderDrawSummary() {
+        const el = document.getElementById('drawSummary');
+        const hint = document.getElementById('drawHint');
+        if (type === 'SSQ') {
+            const redOk = drawRed.length === SSQ_RED_PICK;
+            const blueOk = drawBlue !== null;
+            if (redOk && blueOk) {
+                el.innerHTML = '<span class="text-danger fw-bold">🔴 ' + drawRed.join(' ') + '</span>'
+                    + ' &nbsp; <span class="text-primary fw-bold">🔵 ' + drawBlue + '</span>';
+                hint.textContent = '✅ 开奖号码已就绪';
+                hint.className = 'text-success small ms-auto';
+            } else {
+                el.innerHTML = '<span class="text-secondary">'
+                    + (drawRed.length ? '🔴 ' + drawRed.join(' ') : '红球未选')
+                    + ' &nbsp; '
+                    + (drawBlue ? '🔵 ' + drawBlue : '蓝球未选')
+                    + '</span>';
+                hint.textContent = '还需选择 ' + (SSQ_RED_PICK - drawRed.length) + ' 个红球'
+                    + (drawBlue ? '' : ' + 1 个蓝球');
+                hint.className = 'text-warning small ms-auto';
+            }
+        } else {
+            const cnt = drawRed.length;
+            if (cnt >= KL8_DRAW_COUNT) {
+                el.innerHTML = '<span style="color:#DD6B20;font-weight:bold;">🟠 ' + drawRed.join(' ') + '</span>';
+                hint.textContent = '✅ 已选 ' + cnt + ' 个';
+                hint.className = 'text-success small ms-auto';
+            } else {
+                el.innerHTML = '<span class="text-secondary">' + (drawRed.length ? drawRed.join(' ') : '尚未选择') + '</span>';
+                hint.textContent = '还需选择 ' + (KL8_DRAW_COUNT - cnt) + ' 个';
+                hint.className = 'text-warning small ms-auto';
+            }
+        }
+    }
+
+    /** 同步指定网格的高亮 */
+    function syncGridHighlight(gridId, cls, getInputsFn, startIdx, count) {
+        const grid = document.getElementById(gridId);
+        if (!grid) return;
+        const inputs = getInputsFn();
+        if (!inputs.length) { grid.querySelectorAll('.num-ball').forEach(b=>b.classList.remove('sel')); return; }
+        const selected = new Set();
+        for (let i = startIdx; i < startIdx + count && i < inputs.length; i++) {
+            const v = parseInt(inputs[i].value);
+            if (!isNaN(v)) selected.add(v);
+        }
+        grid.querySelectorAll('.num-ball').forEach(b => {
+            b.classList.toggle('sel', selected.has(parseInt(b.textContent)));
+        });
+    }
+
+    function renderKl8PlayBar() {
+        const bar = document.getElementById('kl8PlayBar');
+        const btns = document.getElementById('playBtns');
+        if (type === 'SSQ') { bar.style.display = 'none'; return; }
+        bar.style.display = '';
+        btns.innerHTML = KL8_STYLES.map(s =>
+            '<span class="play-btn' + (s.code===kl8Play?' active':'') + '" onclick="switchPlay(\'' + s.code + '\')">' + s.name + '</span>'
+        ).join('');
+    }
+
+    function renderRules() {
+        const tbody = document.getElementById('rulesBody');
+        if (type === 'SSQ') {
+            tbody.innerHTML = [
+                ['一等奖','红球 6/6 + 蓝球 1/1，奖金浮动（最高1000万）'],
+                ['二等奖','红球 6/6 + 蓝球 0/1，奖金浮动'],
+                ['三等奖','红球 5/6 + 蓝球 1/1，固定 3000元'],
+                ['四等奖','红球 5/6 或 4/6+1/1，固定 200元'],
+                ['五等奖','红球 4/6 或 3/6+1/1，固定 10元'],
+                ['六等奖','蓝球命中（红球 0~2个），固定 5元']
+            ].map(r=>'<tr><td class="fw-bold">'+r[0]+'</td><td>'+r[1]+'</td></tr>').join('');
+        } else {
+            const s = KL8_STYLES.find(x=>x.code===kl8Play) || KL8_STYLES[9];
+            tbody.innerHTML = s.tiers.map(t =>
+                '<tr><td class="fw-bold">'+t.level+'</td><td>'
+                + (t.m===0 ? '0 中（保底）' : '中 '+t.m+' 个')
+                + '，'+t.amount+'</td></tr>'
+            ).join('');
+        }
+    }
+
+    // ==================== 玩法切换 ====================
+    function switchPlay(code) {
+        if (kl8Play === code) return;
+        kl8Play = code;
+        // 重建投注行（数量变了）
+        document.getElementById('betRows').innerHTML = '';
+        activeRow = 0;
+        addBetRow();
+        renderAll();
+    }
+
+    function switchType(t) {
+        if (type === t) return;
+        type = t;
+        kl8Play = 'x10';
+        drawRed = []; drawBlue = null;
+        activeRow = 0;
+        document.getElementById('tabSsq').classList.toggle('active', t==='SSQ');
+        document.getElementById('tabKl8').classList.toggle('active', t==='KL8');
+        document.getElementById('drawSsq').style.display = t==='SSQ' ? '' : 'none';
+        document.getElementById('drawKl8').style.display = t==='KL8' ? '' : 'none';
+        document.getElementById('betRows').innerHTML = '';
+        addBetRow();
+        renderAll();
+    }
+
+    // ==================== 中奖计算 ====================
+    function calc() {
+        // 校验开奖号码
+        if (type === 'SSQ') {
+            if (drawRed.length !== SSQ_RED_PICK) { alert('请先选择 6 个红球作为开奖号码'); return; }
+            if (drawBlue === null) { alert('请先选择蓝球'); return; }
+        } else {
+            if (drawRed.length !== KL8_DRAW_COUNT) { alert('请先选择 20 个开奖号码'); return; }
+        }
+
+        // 收集投注
+        const rows = document.querySelectorAll('.bet-row-wrap');
+        const cfg = getBetConfig();
+        const bets = [];
+        for (const row of rows) {
+            const inputs = row.querySelectorAll('input');
+            const bet = [];
+            for (let i = 0; i < inputs.length; i++) {
+                const v = parseInt(inputs[i].value);
+                if (!isNaN(v)) bet.push(v);
+            }
+            if (bet.length > 0) bets.push(bet);
+        }
+        if (!bets.length) { alert('请至少输入一注有效号码'); return; }
+
+        // 计算
+        const results = [];
+        for (const bet of bets) {
+            if (type === 'SSQ') {
+                // 双色球
+                const betReds = bet.slice(0, 6);
+                const betBlue = bet.length >= 7 ? bet[6] : null;
+                let redMatch = 0;
+                for (const r of betReds) { if (drawRed.includes(r)) redMatch++; }
+                const blueMatch = betBlue !== null && betBlue === drawBlue;
+
+                let level, amount, desc;
+                if (redMatch===6 && blueMatch)      { level='一等奖'; amount='浮动（最高1000万）'; desc='🎉 红球全中+蓝球命中！恭喜中得一等奖！'; }
+                else if (redMatch===6 && !blueMatch){ level='二等奖'; amount='浮动'; desc='🎉 红球全中！恭喜中得二等奖！'; }
+                else if (redMatch===5 && blueMatch) { level='三等奖'; amount='3000元'; desc='恭喜中得三等奖！'; }
+                else if ((redMatch===5&&!blueMatch)||(redMatch===4&&blueMatch)){ level='四等奖'; amount='200元'; desc='恭喜中得四等奖！'; }
+                else if ((redMatch===4&&!blueMatch)||(redMatch===3&&blueMatch)){ level='五等奖'; amount='10元'; desc='恭喜中得五等奖！'; }
+                else if (blueMatch)                 { level='六等奖'; amount='5元'; desc='蓝球命中！恭喜中得六等奖！'; }
+                else                                { level='未中奖'; amount='---'; desc='很遗憾，未中奖'; }
+
+                results.push({ bet, redMatch, blueMatch, level, amount, desc, won:level!=='未中奖' });
+            } else {
+                // 快乐八
+                let match = 0;
+                for (const n of bet) { if (drawRed.includes(n)) match++; }
+                const style = KL8_STYLES.find(x=>x.code===kl8Play) || KL8_STYLES[9];
+                let found = false, level='未中奖', amount='---', desc='';
+                for (const tier of style.tiers) {
+                    if (tier.m === match) {
+                        level = tier.level; amount = tier.amount; found = true;
+                        desc = '🎉 ' + style.name + '中' + match + '！恭喜中得' + tier.level + '！';
+                        break;
+                    }
+                }
+                if (!found) desc = '很遗憾，' + style.name + '命中 ' + match + ' 个号码，未中奖';
+                results.push({ bet, redMatch:match, blueMatch:false, level, amount, desc, won:found });
+            }
+        }
+
+        // 展示结果
+        const area = document.getElementById('resultArea');
+        area.style.display = '';
+        let html = '<div class="section-title">🏆 中奖结果</div>';
+        results.forEach((r, i) => {
+            const cls = r.won ? ' win' : '';
+            html += '<div class="result-line' + cls + '">';
+            html += '<strong>第' + (i+1) + '注：</strong>投注 [' + r.bet.join(' ') + ']';
+            html += '<br>命中 <span class="' + (r.won?'text-danger fw-bold':'text-secondary') + '">'
+                 + r.redMatch + '</span> 个'
+                 + (type==='SSQ' ? (r.blueMatch ? ' | 蓝球 ✅' : ' | 蓝球 ❌') : '');
+            html += '<br><span class="fw-bold ' + (r.won?'text-success':'text-secondary') + '">' + r.desc + '</span>';
+            if (r.won) html += ' <span class="badge bg-warning text-dark">' + r.amount + '</span>';
+            html += '</div>';
+        });
+        area.innerHTML = html;
+        area.scrollIntoView({behavior:'smooth'});
+    }
+
+    // ==================== 初始化 ====================
+    addBetRow();
+    renderAll();
+</script>
+
+</body>
+</html>
