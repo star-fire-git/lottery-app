@@ -157,6 +157,11 @@
         /* 锁定态：绿色边框 + 浅绿背景 */
         .lock-btn.locked { border-color: #38A169; background: #F0FFF4; }
 
+        /* 投注行内的锁按钮缩小，避免抢眼 */
+        .bet-row-wrap .lock-btn {
+            width: 28px; height: 28px; font-size: 0.85rem; flex-shrink: 0;
+        }
+
         /* ========== 命中/未命中高亮（投注行输入框） ========== */
         /* 命中 → 绿色描边 + 浅绿底，视觉化标记 */
         .bet-inp.bet-hit {
@@ -225,8 +230,6 @@
         <div class="divider"></div>
         <div class="section-title">
             📝 我的投注
-            <!-- 锁定/解锁按钮：选中号码后锁定防止误触，解锁后可修改 -->
-            <button id="lockBtn" class="lock-btn" onclick="toggleLock()" title="点击锁定投注">🔓</button>
         </div>
 
         <!-- 快乐八玩法选择 -->
@@ -281,7 +284,6 @@
     let type = 'SSQ';                     // 当前彩种
     let kl8Play = 'x10';                 // 快乐八玩法
     let activeRow = 0;                   // 当前激活的投注行
-    let betLocked = false;               // 投注锁定状态（锁定时禁止修改投注号码，防止误触）
 
     // 开奖号码（用户手动选中的）
     let drawRed = [];                    // SSQ 红球 / KL8 开奖号码
@@ -403,11 +405,51 @@
         return { redCount:s.pick, blueCount:0, maxRed:80, maxBlue:0 };
     }
 
+    // ==================== 行级锁定工具 ====================
+    /**
+     * 根据行索引获取对应的 DOM 元素
+     * @param {number} rowIdx - 行索引（data-row 值）
+     * @returns {Element|null}
+     */
+    function getRowElement(rowIdx) {
+        return document.querySelector('.bet-row-wrap[data-row="' + rowIdx + '"]');
+    }
+
+    /**
+     * 判断指定行是否处于锁定状态
+     * @param {Element} row - 投注行 DOM 元素
+     * @returns {boolean}
+     */
+    function isRowLocked(row) {
+        return row && row.dataset.locked === 'true';
+    }
+
+    /**
+     * 判断当前激活行是否锁定
+     * @returns {boolean}
+     */
+    function isActiveRowLocked() {
+        const row = getRowElement(activeRow);
+        return isRowLocked(row);
+    }
+
+    /**
+     * 根据当前激活行的锁定状态，控制操作区（按钮 + 选号网格）的显隐
+     */
+    function updateActionsVisibility() {
+        const actions = document.getElementById('betActions');
+        const grid = document.getElementById('betSelectorGrid');
+        const locked = isActiveRowLocked();
+        if (actions) actions.style.display = locked ? 'none' : '';
+        if (grid) grid.style.display = locked ? 'none' : '';
+    }
+
     function addBetRow() {
         const rows = document.querySelectorAll('.bet-row-wrap');
         const idx = rows.length;
         const cfg = getBetConfig();
-        let html = '<div class="bet-row-wrap" data-row="' + idx + '" onclick="setActive(' + idx + ')">';
+        /* 每行新增 data-locked 属性标记锁定状态，默认未锁定 */
+        let html = '<div class="bet-row-wrap" data-row="' + idx + '" data-locked="false" onclick="setActive(' + idx + ')">';
         html += '<span class="bet-row-num">第' + (idx+1) + '注</span>';
         for (let i = 0; i < cfg.redCount; i++) {
             html += '<input class="form-control bet-inp" type="number" min="1" max="' + cfg.maxRed
@@ -419,22 +461,19 @@
                  + '" placeholder="蓝" onfocus="setActive(' + idx + ')" oninput="syncBetUI()"'
                  + ' style="border-color:#90CDF4;">';
         }
+        /* 行尾锁按钮：阻止事件冒泡，避免触发行点击切换激活行 */
+        html += '<button class="lock-btn" onclick="event.stopPropagation();toggleRowLock(' + idx + ')" title="点击锁定本注">🔓</button>';
         html += '</div>';
         document.getElementById('betRows').insertAdjacentHTML('beforeend', html);
-        /* 锁定状态下新增的行需要禁用输入框 */
-        if (betLocked) {
-            const newRow = document.querySelector('.bet-row-wrap[data-row="' + idx + '"]');
-            if (newRow) newRow.querySelectorAll('input').forEach(inp => inp.disabled = true);
-        }
         setActive(idx);
     }
 
     function removeActiveRow() {
-        /* 锁定状态禁止删除投注行 */
-        if (betLocked) { showToast('🔒 投注已锁定，请先解锁'); return; }
+        /* 当前行已锁定时禁止删除 */
+        if (isActiveRowLocked()) { showToast('🔒 本注已锁定，请先解锁'); return; }
         const rows = document.querySelectorAll('.bet-row-wrap');
         if (rows.length <= 1) { alert('至少保留一注'); return; }
-        const target = document.querySelector('.bet-row-wrap[data-row="' + activeRow + '"]');
+        const target = getRowElement(activeRow);
         if (target) target.remove();
         renumberRows();
         if (activeRow >= document.querySelectorAll('.bet-row-wrap').length)
@@ -445,15 +484,27 @@
     function setActive(idx) {
         activeRow = idx;
         document.querySelectorAll('.bet-row-wrap').forEach(r=>r.classList.remove('active-row'));
-        const row = document.querySelector('.bet-row-wrap[data-row="' + idx + '"]');
+        const row = getRowElement(idx);
         if (row) row.classList.add('active-row');
         renderBetGrid();
+        /* 根据当前行锁定状态控制操作区（按钮 + 选号网格）显隐 */
+        updateActionsVisibility();
     }
 
     function renumberRows() {
-        document.querySelectorAll('.bet-row-wrap').forEach((r,i) => {
+        document.querySelectorAll('.bet-row-wrap').forEach((r, i) => {
             r.dataset.row = i;
-            r.querySelector('.bet-row-num').textContent = '第' + (i+1) + '注';
+            /* 更新行内锁按钮的 onclick 参数，保持索引一致 */
+            const lockBtn = r.querySelector('.lock-btn');
+            if (lockBtn) {
+                lockBtn.setAttribute('onclick', 'event.stopPropagation();toggleRowLock(' + i + ')');
+            }
+            r.querySelector('.bet-row-num').textContent = '第' + (i + 1) + '注';
+            /* 同步更新行级点击切换与输入框的 onfocus 属性 */
+            r.setAttribute('onclick', 'setActive(' + i + ')');
+            r.querySelectorAll('input').forEach(inp => {
+                inp.setAttribute('onfocus', 'setActive(' + i + ')');
+            });
         });
     }
 
@@ -474,8 +525,8 @@
     }
 
     function randomActiveBet() {
-        /* 锁定状态禁止随机填充 */
-        if (betLocked) { showToast('🔒 投注已锁定，请先解锁'); return; }
+        /* 当前行已锁定时禁止随机填充 */
+        if (isActiveRowLocked()) { showToast('🔒 本注已锁定，请先解锁'); return; }
         const cfg = getBetConfig();
         const reds = randomNums(cfg.redCount, cfg.maxRed);
         if (cfg.blueCount) reds.push(randomNums(1, cfg.maxBlue)[0]);
@@ -534,8 +585,8 @@
     }
 
     function clickBetBall(num, isBlue) {
-        /* 锁定状态禁止点击选号 */
-        if (betLocked) { showToast('🔒 投注已锁定，请先解锁'); return; }
+        /* 当前行已锁定时禁止点击选号 */
+        if (isActiveRowLocked()) { showToast('🔒 本注已锁定，请先解锁'); return; }
         const inputs = getActiveInputs();
         if (!inputs.length) return;
         const cfg = getBetConfig();
@@ -565,7 +616,7 @@
                 }
             }
             /* 选号后按从小到大排序，保持号码整齐有序 */
-            sortRowNumbers(getActiveRowElement());
+            sortRowNumbers(getRowElement(activeRow));
         }
         syncBetUI();
     }
@@ -581,8 +632,8 @@
             /* 快乐八：同步号码网格高亮（输入框数量 = 当前玩法的选号数） */
             syncGridHighlight('betKl8Grid', 'k', ()=>getActiveInputs(), 0, getBetConfig().redCount);
         }
-        /* 未锁定时用户修改了输入 → 上一次的命中高亮已过时，自动清除 */
-        if (!betLocked) clearBetHighlights();
+        /* 当前行未锁定时用户修改了输入 → 上一次的命中高亮已过时，自动清除 */
+        if (!isActiveRowLocked()) clearBetHighlights();
     }
 
     // ==================== 锁定 / 解锁 ====================
@@ -623,6 +674,52 @@
             if (actions) actions.style.display = '';
             if (grid) grid.style.display = '';
             clearBetHighlights();
+        }
+    }
+
+    // ==================== 行级锁定 / 解锁 ====================
+    /**
+     * 切换指定行的锁定状态。
+     * 锁定后：本行输入框置灰不可编辑。
+     * 解锁后：恢复编辑能力，同时清除本行的命中高亮（结果已过期）。
+     * @param {number} rowIdx - 行索引（data-row 值）
+     */
+    function toggleRowLock(rowIdx) {
+        const row = getRowElement(rowIdx);
+        if (!row) return;
+        const lockBtn = row.querySelector('.lock-btn');
+        const isLocked = row.dataset.locked === 'true';
+
+        if (isLocked) {
+            /* 解锁：恢复输入框可编辑，移除锁定样式 */
+            row.dataset.locked = 'false';
+            if (lockBtn) {
+                lockBtn.innerHTML = '🔓';
+                lockBtn.title = '点击锁定本注';
+                lockBtn.classList.remove('locked');
+            }
+            row.classList.remove('locked');
+            row.querySelectorAll('input').forEach(inp => inp.disabled = false);
+            /* 清除本行命中高亮（上次计算结果已过时） */
+            row.querySelectorAll('input.bet-hit, input.bet-miss').forEach(inp => {
+                inp.classList.remove('bet-hit', 'bet-miss');
+            });
+        } else {
+            /* 锁定：排序号码 → 禁用输入框 → 标记锁定样式 */
+            sortRowNumbers(row);
+            row.dataset.locked = 'true';
+            if (lockBtn) {
+                lockBtn.innerHTML = '🔒';
+                lockBtn.title = '本注已锁定，点击解锁';
+                lockBtn.classList.add('locked');
+            }
+            row.classList.add('locked');
+            row.querySelectorAll('input').forEach(inp => inp.disabled = true);
+        }
+
+        /* 如果当前激活行就是被操作的行，同步更新操作区显隐 */
+        if (parseInt(row.dataset.row) === activeRow) {
+            updateActionsVisibility();
         }
     }
 
@@ -831,8 +928,7 @@
     function switchPlay(code) {
         if (kl8Play === code) return;
         kl8Play = code;
-        /* 切换玩法 → 强制解锁并重建投注行 */
-        if (betLocked) toggleLock();
+        /* 切换玩法 → 清空重建所有投注行 */
         document.getElementById('betRows').innerHTML = '';
         activeRow = 0;
         addBetRow();
@@ -938,8 +1034,12 @@
         area.innerHTML = html;
         /* 计算完成后标记投注行的命中/未命中颜色 */
         highlightBetRows(results);
-        /* 自动锁定，防止误触修改已参与计算的投注号码 */
-        if (!betLocked) toggleLock();
+        /* 自动锁定所有行，防止误触修改已参与计算的投注号码 */
+        document.querySelectorAll('.bet-row-wrap').forEach(row => {
+            if (row.dataset.locked !== 'true') {
+                toggleRowLock(parseInt(row.dataset.row));
+            }
+        });
         area.scrollIntoView({behavior:'smooth'});
     }
 
