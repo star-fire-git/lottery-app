@@ -1,0 +1,18 @@
+# ==================== 构建阶段 ====================
+FROM maven:3.9-eclipse-temurin-17-alpine AS builder
+WORKDIR /app
+COPY pom.xml .
+RUN mvn dependency:go-offline -B -q
+COPY src ./src
+RUN mvn package -DskipTests -B -q
+
+# ==================== 运行阶段 ====================
+FROM eclipse-temurin:17-jre-alpine
+WORKDIR /app
+COPY --from=builder /app/target/*.jar app.jar
+
+# Render 免费实例 512MB，JVM 参数可放宽
+ENV JAVA_OPTS="-Xmx256m -Xss512k -XX:+UseSerialGC -XX:MaxRAMPercentage=75.0"
+
+EXPOSE 8080
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
