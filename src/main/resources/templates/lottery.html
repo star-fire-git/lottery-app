@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="${currentType.name} + ' - 彩票中奖查询'">彩票中奖查询</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" th:href="@{/css/lottery.css}">
+</head>
+<body>
+
+<div class="container py-4">
+    <h2 class="text-center mb-3">🎰 彩票中奖查询</h2>
+
+    <!-- ==================== 彩种切换标签 ==================== -->
+    <ul class="nav nav-tabs justify-content-center mb-4" id="lotteryTabs">
+        <li class="nav-item" th:each="t : ${lotteryTypes}">
+            <a class="nav-link" th:classappend="${t == currentType} ? 'active'"
+               th:href="${t.pagePath}" th:text="${t.name}">双色球</a>
+        </li>
+    </ul>
+
+    <!-- ==================== 开奖号码展示区 + 期号选择 ==================== -->
+    <div class="card mb-4" id="drawSection">
+        <div class="card-body text-center">
+            <div class="d-flex justify-content-center align-items-center gap-3 mb-2 flex-wrap">
+                <!-- 期号下拉选择 -->
+                <select class="form-select form-select-sm" id="periodSelect" style="width:auto;"
+                        onchange="onPeriodChange()">
+                    <option value="">选择期号...</option>
+                    <option th:each="p : ${periods}"
+                            th:value="${p}"
+                            th:text="${p}"
+                            th:selected="${p == drawData.periodNo}">2025001</option>
+                </select>
+                <h5 class="card-title mb-0">
+                    第 <span th:text="${drawData.periodNo}" id="periodNo">----</span> 期
+                </h5>
+                <span class="text-muted">
+                    开奖日期：<span th:text="${drawData.drawDate}" id="drawDate">----</span>
+                </span>
+                <!-- 手动输入按钮 -->
+                <button id="manualBtn" class="btn btn-outline-warning btn-sm" onclick="openManualModal()"
+                        title="API 获取失败或数据有误时，可手动输入开奖号码">
+                    ✏️ 手动输入
+                </button>
+                <span id="manualBadge" class="badge bg-warning text-dark" style="display:none;">
+                    ⚠ 手动数据
+                </span>
+            </div>
+
+            <!-- 开奖号码球（统一容器，JS 动态渲染红球+可选蓝球） -->
+            <div class="ball-container my-3" id="drawBalls">
+                <span class="ball ball-red" th:each="r : ${drawData.redBalls}" th:text="${r}">00</span>
+                <span th:if="${drawData.blueBall != null}" class="ball ball-blue"
+                      th:text="${drawData.blueBall}">00</span>
+            </div>
+
+            <p class="text-muted mt-2">
+                奖池金额：<strong th:text="'¥' + ${drawData.poolAmount}" id="poolAmount">¥---</strong>
+            </p>
+            <p class="text-muted small" th:text="${ballDesc}">号码描述</p>
+        </div>
+    </div>
+
+    <!-- ==================== 投注输入区 ==================== -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">📝 输入你的投注号码</h5>
+            <p class="text-muted small mb-2" th:text="${ballDesc}"></p>
+
+            <!-- 快乐八玩法选择器（仅 KL8 显示，双色球不渲染） -->
+            <div th:if="${!playStyles.isEmpty()}" class="play-style-bar mb-3">
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <span class="fw-bold text-secondary small">玩法：</span>
+                    <div class="btn-group btn-group-sm" id="playStyleGroup" role="group">
+                        <!-- 注意：Thymeleaf 3.x 不允许在 th:onclick 中使用字符串变量，
+                             改为 data-* 属性传数据，原生 onclick 从 this.dataset 读取 -->
+                        <button th:each="ps,iterStat : ${playStyles}"
+                                type="button"
+                                class="btn play-style-btn"
+                                th:classappend="${iterStat.last} ? 'active'"
+                                th:data-code="${ps.code}"
+                                th:data-pick="${ps.pickCount}"
+                                th:text="${ps.name}"
+                                onclick="switchPlayStyle(this.dataset.code, parseInt(this.dataset.pick))">
+                            选十
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 投注行容器（首行由 JS 按 ballConfig 动态生成） -->
+            <div id="betRows"></div>
+
+            <div class="mt-2">
+                <button class="btn btn-outline-secondary btn-sm" onclick="addBetRow()">+ 添加一注</button>
+                <button class="btn btn-outline-info btn-sm ms-2" onclick="clearActiveRow()">清空当前注</button>
+                <button class="btn btn-primary btn-sm ms-2" onclick="calculatePrize()">🎯 计算中奖</button>
+            </div>
+
+            <!-- ==================== 球号点击选择器（JS 动态生成） ==================== -->
+            <div class="ball-selector mt-3" id="ballSelectorContainer"></div>
+        </div>
+    </div>
+
+    <!-- ==================== 中奖结果区 ==================== -->
+    <div class="card mb-4" id="resultSection" style="display:none;">
+        <div class="card-body">
+            <h5 class="card-title">🏆 中奖结果</h5>
+            <div id="resultContent"></div>
+        </div>
+    </div>
+
+    <!-- ==================== 玩法规则 ==================== -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">📋 玩法规则</h5>
+            <table class="table table-sm table-bordered">
+                <thead class="table-light">
+                <tr><th>等级</th><th>中奖条件</th></tr>
+                </thead>
+                <tbody id="rulesTableBody">
+                <tr th:each="entry : ${rules}">
+                    <td th:text="${entry.key}">等级</td>
+                    <td th:text="${entry.value}">规则</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<!-- container 结束 -->
+
+<!-- ==================== 手动输入开奖号码弹窗（JS 动态构建输入框） ==================== -->
+<div class="modal fade" id="manualModal" tabindex="-1" aria-labelledby="manualModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-warning bg-opacity-10">
+                <h5 class="modal-title" id="manualModalLabel">✏️ 手动输入开奖号码</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info small py-2 mb-3">
+                    💡 当 API 获取失败或开奖数据有误时，可在此手动填入正确的开奖号码进行中奖计算
+                </div>
+
+                <!-- 期号 & 日期行 -->
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label small fw-bold mb-1">📅 期号</label>
+                        <input type="text" class="form-control form-control-sm" id="manualPeriodNo"
+                               placeholder="如 2026202" maxlength="7">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small fw-bold mb-1">📅 开奖日期</label>
+                        <input type="date" class="form-control form-control-sm" id="manualDrawDate">
+                    </div>
+                </div>
+
+                <!-- 红球/主号码输入区（JS 动态生成） -->
+                <div class="mb-3">
+                    <label class="form-label small fw-bold text-danger mb-1" id="manualRedLabel">
+                        🔴 红球
+                    </label>
+                    <div class="d-flex gap-2 flex-wrap align-items-center" id="manualRedInputs">
+                        <!-- JS 按 ballConfig.drawnRedCount 动态生成 input -->
+                    </div>
+                    <div class="form-text small" id="manualRedError" style="display:none;color:#E53E3E;"></div>
+                </div>
+
+                <!-- 蓝球输入区（仅双色球显示，快乐八隐藏） -->
+                <div class="mb-2" id="manualBlueSection">
+                    <label class="form-label small fw-bold text-primary mb-1">
+                        🔵 蓝球（1个，范围 1-<span id="manualBlueMax">16</span>）
+                    </label>
+                    <input type="number" class="form-control form-control-sm manual-blue-inp" id="manualBlueBall"
+                           min="1" max="16" placeholder="蓝球" style="width:90px;">
+                    <div class="form-text small" id="manualBlueError" style="display:none;color:#E53E3E;"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="manualClearBtn"
+                        onclick="clearManualMode()" style="display:none;">
+                    🔄 恢复 API 数据
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-warning btn-sm" onclick="submitManualDraw()">
+                    ✅ 确认使用
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script th:inline="javascript">
+    /*<![CDATA[*/
+    let betRowCount = 0;
+    let activeRowIndex = 0;
+    const currentType = /*[[${currentType.code}]]*/ 'SSQ';
+
+    // 号码配置：由后端策略下发，前端据此动态渲染输入框和选号网格
+    const ballConfig = /*[[${ballConfig}]]*/ {
+        inputCount: 7, redInputCount: 6, blueInputCount: 1,
+        maxRed: 33, maxBlue: 16, drawnRedCount: 6, drawnBlueCount: 1
+    };
+
+    // 快乐八专属：所有玩法规则映射表（key=玩法编码，value=规则Map）
+    const kl8AllRules = /*[[${kl8AllRules}]]*/ null;
+    // 当前选中的快乐八玩法编码（默认选十）
+    let currentKl8Style = 'x10';
+
+    /**
+     * 切换快乐八玩法：重建投注行、更新规则表、更新选号器提示
+     * @param {string} code 玩法编码，如 "x5"
+     * @param {number} pickCount 该玩法需选号码个数
+     */
+    function switchPlayStyle(code, pickCount) {
+        if (currentKl8Style === code) return;
+        currentKl8Style = code;
+
+        // 更新按钮高亮
+        document.querySelectorAll('.play-style-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.code === code);
+        });
+
+        // 更新 ballConfig（仅影响输入框数量，号码范围不变）
+        ballConfig.inputCount = pickCount;
+        ballConfig.redInputCount = pickCount;
+
+        // 更新选号器标签提示
+        const label = document.querySelector('#ballSelectorContainer .ball-selector-label');
+        if (label) {
+            label.textContent = '🟠 号码 1-' + ballConfig.maxRed
+                + '（点击选择/取消，选 ' + pickCount + ' 个）';
+        }
+
+        // 重建所有投注行
+        rebuildAllBetRows();
+
+        // 更新规则表
+        if (kl8AllRules && kl8AllRules[code]) {
+            updateRulesTable(kl8AllRules[code]);
+        }
+    }
+
+    /**
+     * 重建所有投注行（切换玩法时调用，清空已有投注）
+     */
+    function rebuildAllBetRows() {
+        document.getElementById('betRows').innerHTML = '';
+        betRowCount = 0;
+        activeRowIndex = 0;
+        addBetRow();
+    }
+
+    /**
+     * 更新页面底部规则表
+     * @param {Object} rules 该玩法的规则 Map
+     */
+    function updateRulesTable(rules) {
+        const tbody = document.getElementById('rulesTableBody');
+        if (!tbody) return;
+        let html = '';
+        for (const [level, condition] of Object.entries(rules)) {
+            html += '<tr><td>' + level + '</td><td>' + condition + '</td></tr>';
+        }
+        tbody.innerHTML = html;
+    }
+
+    // ==================== 球号选择器（动态构建） ====================
+    /**
+     * 根据 ballConfig 构建选号网格
+     * <p>双色球：33 红球（11 列）+ 16 蓝球（8 列）分两区
+     * 快乐八：80 个号码（10 列）单一网格</p>
+     */
+    function buildBallSelector() {
+        const container = document.getElementById('ballSelectorContainer');
+        const isKL8 = ballConfig.blueInputCount === 0;
+
+        if (isKL8) {
+            // 快乐八：80 个号码，10 列网格，统一颜色
+            container.innerHTML = `
+                <div class="ball-selector-group" style="max-width:100%;">
+                    <div class="ball-selector-label text-warning fw-bold mb-2">
+                        🟠 号码 1-${ballConfig.maxRed}（点击选择/取消，选 ${ballConfig.redInputCount} 个）
+                    </div>
+                    <div class="ball-grid-kl8" id="mainBallGrid"></div>
+                </div>`;
+            const grid = document.getElementById('mainBallGrid');
+            for (let n = 1; n <= ballConfig.maxRed; n++) {
+                const ball = document.createElement('span');
+                ball.className = 'ball-selector-ball ball-selector-kl8';
+                ball.textContent = n;
+                ball.dataset.num = n;
+                ball.onclick = function() { toggleMainBall(n); };
+                grid.appendChild(ball);
+            }
+        } else {
+            // 双色球：红球 33 + 蓝球 16 分两区
+            container.innerHTML = `
+                <div class="d-flex gap-3 flex-wrap">
+                    <div class="ball-selector-group">
+                        <div class="ball-selector-label text-danger fw-bold mb-2">
+                            🔴 红球 1-${ballConfig.maxRed}（点击选择/取消）
+                        </div>
+                        <div class="ball-grid" id="redBallGrid"></div>
+                    </div>
+                    <div class="ball-selector-group">
+                        <div class="ball-selector-label text-primary fw-bold mb-2">
+                            🔵 蓝球 1-${ballConfig.maxBlue}（点击选择/取消）
+                        </div>
+                        <div class="ball-grid-blue" id="blueBallGrid"></div>
+                    </div>
+                </div>`;
+            const redGrid = document.getElementById('redBallGrid');
+            for (let n = 1; n <= ballConfig.maxRed; n++) {
+                const ball = document.createElement('span');
+                ball.className = 'ball-selector-ball ball-selector-red';
+                ball.textContent = n;
+                ball.dataset.num = n;
+                ball.onclick = function() { toggleMainBall(n); };
+                redGrid.appendChild(ball);
+            }
+            const blueGrid = document.getElementById('blueBallGrid');
+            for (let n = 1; n <= ballConfig.maxBlue; n++) {
+                const ball = document.createElement('span');
+                ball.className = 'ball-selector-ball ball-selector-blue';
+                ball.textContent = n;
+                ball.dataset.num = n;
+                ball.onclick = function() { toggleBlueBall(n); };
+                blueGrid.appendChild(ball);
+            }
+        }
+    }
+
+    /**
+     * 点击主号码球（红球/快乐八号码）：在当前活跃行中切换
+     * <p>适用于所有号码类型的 toggle 逻辑：已存在则移除，不存在则填入第一个空位</p>
+     */
+    function toggleMainBall(num) {
+        const row = getActiveRow();
+        if (!row) return;
+        const maxNum = ballConfig.maxRed;
+        if (num < 1 || num > maxNum) return;
+        const inputs = row.querySelectorAll('.main-ball-input');
+        let existingIdx = -1;
+        inputs.forEach((inp, idx) => {
+            if (parseInt(inp.value) === num) existingIdx = idx;
+        });
+        if (existingIdx >= 0) {
+            inputs[existingIdx].value = '';
+            for (let i = existingIdx; i < inputs.length - 1; i++) {
+                inputs[i].value = inputs[i + 1].value;
+            }
+            inputs[inputs.length - 1].value = '';
+        } else {
+            for (let inp of inputs) {
+                if (!inp.value) { inp.value = num; break; }
+            }
+        }
+        syncBallSelector();
+    }
+
+    /**
+     * 点击蓝球：仅在双色球模式生效，单选切换
+     */
+    function toggleBlueBall(num) {
+        if (ballConfig.blueInputCount === 0) return;
+        const row = getActiveRow();
+        if (!row) return;
+        const blueInput = row.querySelector('.blue-ball-input');
+        if (blueInput) {
+            blueInput.value = (parseInt(blueInput.value) === num) ? '' : num;
+        }
+        syncBallSelector();
+    }
+
+    /**
+     * 同步球号选择器高亮状态
+     */
+    function syncBallSelector() {
+        const row = getActiveRow();
+        document.querySelectorAll('.ball-selector-ball').forEach(b => b.classList.remove('selected'));
+        if (!row) return;
+
+        // 高亮主号码
+        row.querySelectorAll('.main-ball-input').forEach(inp => {
+            const v = parseInt(inp.value);
+            if (!isNaN(v)) {
+                const sel = ballConfig.blueInputCount === 0
+                    ? '.ball-selector-kl8' : '.ball-selector-red';
+                const ball = document.querySelector(sel + '[data-num="' + v + '"]');
+                if (ball) ball.classList.add('selected');
+            }
+        });
+        // 高亮蓝球（仅双色球）
+        if (ballConfig.blueInputCount > 0) {
+            const blueInp = row.querySelector('.blue-ball-input');
+            if (blueInp) {
+                const bv = parseInt(blueInp.value);
+                if (!isNaN(bv)) {
+                    const ball = document.querySelector('.ball-selector-blue[data-num="' + bv + '"]');
+                    if (ball) ball.classList.add('selected');
+                }
+            }
+        }
+    }
+
+    // ==================== 投注行管理 ====================
+    function getActiveRow() {
+        let row = document.querySelector('.bet-row[data-row="' + activeRowIndex + '"]');
+        if (!row) {
+            const rows = document.querySelectorAll('.bet-row');
+            if (rows.length > 0) { row = rows[0]; activeRowIndex = 0; }
+        }
+        return row;
+    }
+
+    function setActiveRow(idx) {
+        activeRowIndex = idx;
+        syncBallSelector();
+        document.querySelectorAll('.bet-row').forEach(r => r.classList.remove('bet-row-active'));
+        const row = document.querySelector('.bet-row[data-row="' + idx + '"]');
+        if (row) row.classList.add('bet-row-active');
+    }
+
+    function clearActiveRow() {
+        const row = getActiveRow();
+        if (!row) return;
+        row.querySelectorAll('input').forEach(inp => inp.value = '');
+        syncBallSelector();
+    }
+
+    /**
+     * 按 ballConfig 构建单行投注 HTML
+     * @param {number} idx 行序号
+     * @returns {string} 行 HTML
+     */
+    function buildBetRowHTML(idx) {
+        const betNo = idx + 1;
+        const hasBlue = ballConfig.blueInputCount > 0;
+        const maxRed = ballConfig.maxRed;
+        const maxBlue = ballConfig.maxBlue;
+
+        // 主号码输入框
+        let redInputsHTML = '';
+        for (let i = 0; i < ballConfig.redInputCount; i++) {
+            redInputsHTML += `<input type="number" class="form-control main-ball-input" min="1" max="${maxRed}"
+                placeholder="${hasBlue ? '红' : '号'}"
+                onfocus="setActiveRow(${idx})" oninput="syncBallSelector()">`;
+        }
+
+        // 蓝球区（仅双色球）
+        let blueHTML = '';
+        if (hasBlue) {
+            blueHTML = `
+                <div class="col-auto"><span class="text-primary fw-bold">+</span></div>
+                <div class="col-auto">
+                    <input type="number" class="form-control blue-ball-input" min="1" max="${maxBlue}"
+                        placeholder="蓝" onfocus="setActiveRow(${idx})" oninput="syncBallSelector()">
+                </div>`;
+        }
+
+        // 删除按钮（首行保留，其余可删）
+        const delBtn = idx === 0 ? '' : `
+            <div class="col-auto">
+                <button class="btn btn-outline-danger btn-sm"
+                    onclick="this.closest('.bet-row').remove();updateRowNumbers();syncBallSelector();">✕</button>
+            </div>`;
+
+        return `
+            <div class="bet-row row align-items-center mb-2" data-row="${idx}">
+                <div class="col-auto"><strong>第${betNo}注：</strong></div>
+                <div class="col-auto red-inputs d-flex gap-1">${redInputsHTML}</div>
+                ${blueHTML}
+                ${delBtn}
+            </div>`;
+    }
+
+    function addBetRow() {
+        const rows = document.querySelectorAll('.bet-row');
+        const idx = rows.length;
+        const row = document.createElement('div');
+        row.innerHTML = buildBetRowHTML(idx);
+        document.getElementById('betRows').appendChild(row.firstElementChild);
+        betRowCount = idx + 1;
+        setActiveRow(idx);
+    }
+
+    function updateRowNumbers() {
+        const rows = document.querySelectorAll('.bet-row');
+        rows.forEach((row, i) => {
+            row.querySelector('strong').textContent = '第' + (i + 1) + '注：';
+            row.dataset.row = i;
+            row.querySelectorAll('input').forEach(inp => {
+                inp.setAttribute('onfocus', 'setActiveRow(' + i + ')');
+            });
+        });
+        betRowCount = rows.length;
+        if (activeRowIndex >= betRowCount) activeRowIndex = Math.max(0, betRowCount - 1);
+    }
+
+    function collectBets() {
+        const rows = document.querySelectorAll('.bet-row');
+        const bets = [];
+        const hasBlue = ballConfig.blueInputCount > 0;
+        rows.forEach(row => {
+            const bet = [];
+            const redInputs = row.querySelectorAll('.main-ball-input');
+            const redSet = new Set();
+
+            redInputs.forEach(inp => {
+                const v = parseInt(inp.value);
+                if (!isNaN(v)) {
+                    // 校验号码范围
+                    if (v < 1 || v > maxRed) {
+                        throw new Error('第' + (rowIdx + 1) + '注号码 ' + v
+                            + ' 超出范围 1-' + maxRed);
+                    }
+                    // 校验号码不重复
+                    if (redSet.has(v)) {
+                        throw new Error('第' + (rowIdx + 1) + '注号码 ' + v + ' 重复');
+                    }
+                    redSet.add(v);
+                    bet.push(v);
+                }
+            });
+
+            if (hasBlue) {
+                const blueInp = row.querySelector('.blue-ball-input');
+                if (blueInp) {
+                    const bv = parseInt(blueInp.value);
+                    if (!isNaN(bv)) {
+                        if (bv < 1 || bv > ballConfig.maxBlue) {
+                            throw new Error('第' + (rowIdx + 1) + '注蓝球 ' + bv
+                                + ' 超出范围 1-' + ballConfig.maxBlue);
+                        }
+                        bet.push(bv);
+                    }
+                }
+            }
+            if (bet.length > 0) bets.push(bet);
+        });
+        return bets;
+    }
+
+    // ==================== 期号切换 ====================
+    function onPeriodChange() {
+        if (manualMode) { clearManualModeSilent(); }
+        const periodNo = document.getElementById('periodSelect').value;
+        if (!periodNo) return;
+
+        fetch('/api/lottery/draw?type=' + currentType + '&periodNo=' + periodNo)
+            .then(res => res.json())
+            .then(json => {
+                if (json.code !== 0) { alert('获取开奖数据失败'); return; }
+                const data = json.data;
+                document.getElementById('periodNo').textContent = data.periodNo;
+                document.getElementById('drawDate').textContent = data.drawDate;
+                document.getElementById('poolAmount').textContent = '¥' + (data.poolAmount || '---');
+                // 渲染全部号码球（红球 + 可选蓝球）
+                const ballsContainer = document.getElementById('drawBalls');
+                ballsContainer.innerHTML = '';
+                (data.redBalls || []).forEach(r => {
+                    const span = document.createElement('span');
+                    span.className = 'ball ball-red';
+                    span.textContent = r;
+                    ballsContainer.appendChild(span);
+                });
+                if (data.blueBall != null) {
+                    const blueSpan = document.createElement('span');
+                    blueSpan.className = 'ball ball-blue';
+                    blueSpan.textContent = data.blueBall;
+                    ballsContainer.appendChild(blueSpan);
+                }
+                document.getElementById('periodSelect').value = periodNo;
+            })
+            .catch(err => alert('请求失败: ' + err.message));
+    }
+
+    // ==================== 中奖计算 ====================
+    function calculatePrize() {
+        const bets = collectBets();
+        if (bets.length === 0) { alert('请至少输入一注有效的投注号码！'); return; }
+
+        const periodNo = document.getElementById('periodSelect').value
+                      || document.getElementById('periodNo').textContent.trim();
+
+        const betInput = {
+            lotteryType: currentType,
+            periodNo: periodNo,
+            bets: bets
+        };
+
+        // 快乐八：提交当前选中的玩法编码
+        if (currentType === 'KL8') {
+            betInput.kl8PlayStyle = currentKl8Style;
+        }
+
+        if (manualMode && manualDrawData) {
+            betInput.manualPeriodNo = manualDrawData.periodNo;
+            betInput.manualDrawDate = manualDrawData.drawDate;
+            betInput.manualRedBalls = manualDrawData.redBalls;
+            betInput.manualBlueBall = manualDrawData.blueBall;
+        }
+
+        fetch('/api/lottery/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(betInput)
+        })
+            .then(res => res.json())
+            .then(json => {
+                const section = document.getElementById('resultSection');
+                const content = document.getElementById('resultContent');
+                section.style.display = 'block';
+
+                if (json.code !== 0) {
+                    content.innerHTML = '<div class="alert alert-danger">' + json.msg + '</div>';
+                    return;
+                }
+
+                const results = json.data;
+                const hasBlue = ballConfig.blueInputCount > 0;
+                let html = '';
+                results.forEach(r => {
+                    const wonClass = r.won ? 'border-success bg-success bg-opacity-10' : '';
+                    const matchLabel = hasBlue
+                        ? '红球命中 <span class="text-danger fw-bold">' + r.redMatchCount + '</span> 个'
+                        : '命中 <span class="text-danger fw-bold">' + r.redMatchCount + '</span> 个号码';
+
+                    html += `
+                <div class="result-item card mb-2 ${wonClass}">
+                    <div class="card-body py-2">
+                        <strong>第${r.betIndex}注：</strong>
+                        ${matchLabel}
+                        ${hasBlue ? (r.blueMatch ? ' | 蓝球命中 ✅' : ' | 蓝球未命中 ❌') : ''}
+                        <br>
+                        <span class="fw-bold ${r.won ? 'text-success' : 'text-secondary'}">
+                            ${r.description}
+                        </span>
+                        ${r.won ? '<span class="badge bg-warning text-dark ms-2">' + r.prizeAmount + '</span>' : ''}
+                    </div>
+                </div>`;
+                });
+                content.innerHTML = html;
+                section.scrollIntoView({ behavior: 'smooth' });
+            })
+            .catch(err => { alert('请求失败: ' + err.message); });
+    }
+
+    // ==================== 手动输入开奖号码 ====================
+    let manualMode = false;
+    let manualDrawData = null;
+
+    /**
+     * 动态构建手动输入弹窗的号码输入框
+     */
+    function buildManualInputs() {
+        const container = document.getElementById('manualRedInputs');
+        container.innerHTML = '';
+        const maxRed = ballConfig.maxRed;
+        for (let i = 0; i < ballConfig.drawnRedCount; i++) {
+            const inp = document.createElement('input');
+            inp.type = 'number';
+            inp.className = 'form-control form-control-sm manual-red-inp';
+            inp.min = 1;
+            inp.max = maxRed;
+            inp.placeholder = '号' + (i + 1);
+            container.appendChild(inp);
+        }
+        // 快乐八隐藏蓝球区
+        const blueSection = document.getElementById('manualBlueSection');
+        blueSection.style.display = ballConfig.blueInputCount > 0 ? '' : 'none';
+        // 更新标签
+        const label = document.getElementById('manualRedLabel');
+        if (ballConfig.blueInputCount === 0) {
+            label.textContent = '🟠 开奖号码（' + ballConfig.drawnRedCount + '个，范围 1-' + maxRed + '，不可重复）';
+            label.className = 'form-label small fw-bold text-warning mb-1';
+        } else {
+            label.textContent = '🔴 红球（' + ballConfig.drawnRedCount + '个，范围 1-' + maxRed + '，不可重复）';
+            label.className = 'form-label small fw-bold text-danger mb-1';
+        }
+    }
+
+    function openManualModal() {
+        buildManualInputs(); // 每次打开重建输入框（确保与当前彩种匹配）
+
+        document.getElementById('manualPeriodNo').value = document.getElementById('periodNo').textContent.trim();
+        document.getElementById('manualDrawDate').value = document.getElementById('drawDate').textContent.trim();
+
+        if (manualMode && manualDrawData) {
+            const redInputs = document.querySelectorAll('#manualRedInputs .manual-red-inp');
+            redInputs.forEach((inp, i) => {
+                inp.value = (manualDrawData.redBalls && i < manualDrawData.redBalls.length)
+                    ? manualDrawData.redBalls[i] : '';
+            });
+            if (ballConfig.blueInputCount > 0) {
+                document.getElementById('manualBlueBall').value = manualDrawData.blueBall || '';
+            }
+            document.getElementById('manualClearBtn').style.display = '';
+        } else {
+            const currentReds = document.querySelectorAll('#drawBalls .ball-red');
+            const redInputs = document.querySelectorAll('#manualRedInputs .manual-red-inp');
+            redInputs.forEach((inp, i) => {
+                inp.value = currentReds[i] ? currentReds[i].textContent.trim() : '';
+            });
+            if (ballConfig.blueInputCount > 0) {
+                const currentBlue = document.querySelector('#drawBalls .ball-blue');
+                document.getElementById('manualBlueBall').value = currentBlue ? currentBlue.textContent.trim() : '';
+            }
+            document.getElementById('manualClearBtn').style.display = 'none';
+        }
+
+        document.getElementById('manualRedError').style.display = 'none';
+        document.getElementById('manualBlueError').style.display = 'none';
+
+        const modal = new bootstrap.Modal(document.getElementById('manualModal'));
+        modal.show();
+    }
+
+    function submitManualDraw() {
+        const maxRed = ballConfig.maxRed;
+        const drawnRedCount = ballConfig.drawnRedCount;
+        const hasBlue = ballConfig.blueInputCount > 0;
+
+        // 校验主号码
+        const redInputs = document.querySelectorAll('#manualRedInputs .manual-red-inp');
+        const redBalls = [];
+        const redSet = new Set();
+        let redError = '';
+        redInputs.forEach((inp, i) => {
+            const v = parseInt(inp.value);
+            if (isNaN(v) || v < 1 || v > maxRed) {
+                redError = '号码 ' + (i + 1) + ' 无效，请输入 1-' + maxRed + ' 之间的数字';
+                return;
+            }
+            if (redSet.has(v)) {
+                redError = '号码 ' + v + ' 重复，请确保 ' + drawnRedCount + ' 个号码各不相同';
+                return;
+            }
+            redSet.add(v);
+            redBalls.push(v);
+        });
+        if (redError || redBalls.length !== drawnRedCount) {
+            const errEl = document.getElementById('manualRedError');
+            errEl.textContent = redError || '请完整填入 ' + drawnRedCount + ' 个不重复的号码';
+            errEl.style.display = '';
+            return;
+        }
+        document.getElementById('manualRedError').style.display = 'none';
+
+        // 校验蓝球（仅双色球）
+        let blueBall = null;
+        if (hasBlue) {
+            blueBall = parseInt(document.getElementById('manualBlueBall').value);
+            if (isNaN(blueBall) || blueBall < 1 || blueBall > ballConfig.maxBlue) {
+                const errEl = document.getElementById('manualBlueError');
+                errEl.textContent = '请输入 1-' + ballConfig.maxBlue + ' 之间的蓝球号码';
+                errEl.style.display = '';
+                return;
+            }
+            document.getElementById('manualBlueError').style.display = 'none';
+        }
+
+        const periodNo = document.getElementById('manualPeriodNo').value.trim();
+        const drawDate = document.getElementById('manualDrawDate').value;
+
+        redBalls.sort((a, b) => a - b);
+        manualDrawData = {
+            periodNo: periodNo,
+            drawDate: drawDate,
+            redBalls: redBalls,
+            blueBall: blueBall
+        };
+
+        manualMode = true;
+        applyManualDrawToUI();
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('manualModal'));
+        modal.hide();
+    }
+
+    function applyManualDrawToUI() {
+        if (!manualDrawData) return;
+        document.getElementById('periodNo').textContent = manualDrawData.periodNo || '----';
+        document.getElementById('drawDate').textContent = manualDrawData.drawDate || '----';
+
+        const ballsContainer = document.getElementById('drawBalls');
+        ballsContainer.innerHTML = '';
+        (manualDrawData.redBalls || []).forEach(r => {
+            const span = document.createElement('span');
+            span.className = 'ball ball-red';
+            span.textContent = r;
+            ballsContainer.appendChild(span);
+        });
+        if (manualDrawData.blueBall != null) {
+            const blueSpan = document.createElement('span');
+            blueSpan.className = 'ball ball-blue';
+            blueSpan.textContent = manualDrawData.blueBall;
+            ballsContainer.appendChild(blueSpan);
+        }
+
+        document.getElementById('manualBadge').style.display = '';
+        document.getElementById('manualBtn').textContent = '✏️ 修改号码';
+        document.getElementById('manualBtn').className = 'btn btn-warning btn-sm';
+        document.getElementById('drawSection').classList.add('manual-mode-active');
+    }
+
+    function clearManualMode() {
+        manualMode = false;
+        manualDrawData = null;
+        document.getElementById('manualBadge').style.display = 'none';
+        document.getElementById('manualBtn').textContent = '✏️ 手动输入';
+        document.getElementById('manualBtn').className = 'btn btn-outline-warning btn-sm';
+        document.getElementById('drawSection').classList.remove('manual-mode-active');
+        const periodSelect = document.getElementById('periodSelect');
+        if (periodSelect.value) { onPeriodChange(); } else { location.reload(); }
+        const modal = bootstrap.Modal.getInstance(document.getElementById('manualModal'));
+        if (modal) modal.hide();
+    }
+
+    function clearManualModeSilent() {
+        manualMode = false;
+        manualDrawData = null;
+        document.getElementById('manualBadge').style.display = 'none';
+        document.getElementById('manualBtn').textContent = '✏️ 手动输入';
+        document.getElementById('manualBtn').className = 'btn btn-outline-warning btn-sm';
+        document.getElementById('drawSection').classList.remove('manual-mode-active');
+    }
+
+    // ==================== 页面初始化 ====================
+    buildBallSelector();
+    addBetRow(); // 动态创建首行投注
+    setActiveRow(0);
+    /*]]>*/
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
