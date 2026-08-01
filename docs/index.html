@@ -1075,9 +1075,10 @@
 <!-- 注册 Service Worker，满足狐猴等 Chromium 内核浏览器 PWA 安装条件 -->
 <script>
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js')
-            .then(reg => console.log('SW 注册成功:', reg.scope))
-            .catch(err => console.log('SW 注册失败:', err));
+        /* 使用相对路径，兼容本地预览与 GitHub Pages 子目录部署 */
+        navigator.serviceWorker.register('sw.js')
+            .then(reg => console.log('SW 注册成功，scope:', reg.scope))
+            .catch(err => console.error('SW 注册失败:', err));
     }
 </script>
 

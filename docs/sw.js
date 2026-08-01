@@ -1,17 +1,18 @@
 /*
  * Service Worker —— PWA 离线缓存与添加到主屏幕支持
  * 狐猴浏览器等 Chromium 内核浏览器要求注册 SW 后才允许安装 PWA
+ * 注意：所有路径使用相对路径，兼容子目录部署（如 GitHub Pages）
  */
 
 /* 缓存名称，更新版本号可强制刷新缓存 */
-const CACHE_NAME = 'lottery-app-v1';
+const CACHE_NAME = 'lottery-app-v2';
 
-/* 需要预缓存的核心文件列表 */
+/* 需要预缓存的核心文件列表（相对路径，自动适配部署路径） */
 const PRE_CACHE_URLS = [
-    '/',
-    '/index.html',
-    '/manifest.json',
-    '/lottery.css'
+    './',
+    './index.html',
+    './manifest.json',
+    './lottery.css'
 ];
 
 /*
@@ -20,7 +21,10 @@ const PRE_CACHE_URLS = [
 self.addEventListener('install', event => {
     event.waitUntil(
         caches.open(CACHE_NAME).then(cache => {
-            return cache.addAll(PRE_CACHE_URLS);
+            return cache.addAll(PRE_CACHE_URLS).catch(err => {
+                /* 单个资源失败不阻塞 SW 激活 */
+                console.warn('预缓存部分失败:', err);
+            });
         })
     );
     /* 立即激活，不等待旧 SW 释放 */
@@ -28,7 +32,7 @@ self.addEventListener('install', event => {
 });
 
 /*
- * activate 事件：清理旧版本缓存
+ * activate 事件：清理旧版本缓存，立即接管所有页面
  */
 self.addEventListener('activate', event => {
     event.waitUntil(
@@ -39,7 +43,6 @@ self.addEventListener('activate', event => {
             );
         })
     );
-    /* 立即接管所有页面 */
     self.clients.claim();
 });
 
