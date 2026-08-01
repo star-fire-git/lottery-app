@@ -503,6 +503,36 @@
         syncBetUI();
     }
 
+    /**
+     * 将指定投注行的主号码（红球/快乐八号码）按从小到大排序后写回输入框。
+     * 双色球蓝球保持原位不动，不参与排序。
+     * @param {Element|null} row - 投注行 DOM 元素，为 null 时直接返回
+     */
+    function sortRowNumbers(row) {
+        if (!row) return;
+        const cfg = getBetConfig();
+        const inputs = row.querySelectorAll('input');
+        if (!inputs.length) return;
+
+        /* 主号码输入框数量：双色球为 6（红球），快乐八为玩法选号数 */
+        const mainCount = cfg.blueCount ? cfg.redCount : inputs.length;
+
+        /* 收集所有非空主号码值 */
+        const nums = [];
+        for (let i = 0; i < mainCount; i++) {
+            const v = parseInt(inputs[i].value);
+            if (!isNaN(v)) nums.push(v);
+        }
+
+        /* 按数字升序排列 */
+        nums.sort((a, b) => a - b);
+
+        /* 写回排序后的号码，剩余空位清空 */
+        for (let i = 0; i < mainCount; i++) {
+            inputs[i].value = (i < nums.length) ? nums[i] : '';
+        }
+    }
+
     function clickBetBall(num, isBlue) {
         /* 锁定状态禁止点击选号 */
         if (betLocked) { showToast('🔒 投注已锁定，请先解锁'); return; }
@@ -534,6 +564,8 @@
                     if (!inp.value) { inp.value = num; break; }
                 }
             }
+            /* 选号后按从小到大排序，保持号码整齐有序 */
+            sortRowNumbers(getActiveRowElement());
         }
         syncBetUI();
     }
@@ -572,6 +604,8 @@
             btn.title = '投注已锁定，点击解锁';
             btn.classList.add('locked');
             rows.forEach(row => {
+                /* 锁定前将主号码按从小到大排列，保持整洁有序 */
+                sortRowNumbers(row);
                 row.classList.add('locked');
                 row.querySelectorAll('input').forEach(inp => inp.disabled = true);
             });
