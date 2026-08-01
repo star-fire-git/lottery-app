@@ -399,10 +399,16 @@
     }
 
     // ==================== 投注行管理 ====================
-    function getBetConfig() {
-        if (type === 'SSQ') return { redCount:6, blueCount:1, maxRed:33, maxBlue:16 };
-        const s = KL8_STYLES.find(x=>x.code===kl8Play) || KL8_STYLES[9];
-        return { redCount:s.pick, blueCount:0, maxRed:80, maxBlue:0 };
+    /**
+     * 获取当前彩种的投注配置。
+     * @param {string} [playCode] - 快乐八玩法代码（如 'x5'），不传则使用全局 kl8Play
+     * @returns {{redCount, blueCount, maxRed, maxBlue, playCode}}
+     */
+    function getBetConfig(playCode) {
+        if (type === 'SSQ') return { redCount:6, blueCount:1, maxRed:33, maxBlue:16, playCode:null };
+        const code = playCode || kl8Play;
+        const s = KL8_STYLES.find(x => x.code === code) || KL8_STYLES[9];
+        return { redCount: s.pick, blueCount: 0, maxRed: 80, maxBlue: 0, playCode: code };
     }
 
     // ==================== 行级锁定工具 ====================
@@ -444,13 +450,36 @@
         if (grid) grid.style.display = locked ? 'none' : '';
     }
 
+    /**
+     * 获取指定行的投注配置（根据该行 data-play 属性）。
+     * 双色球直接返回默认配置；快乐八按行记录的玩法代码查找。
+     * @param {Element} row - 投注行 DOM 元素
+     * @returns {{redCount, blueCount, maxRed, maxBlue, playCode}}
+     */
+    function getRowConfig(row) {
+        if (type === 'SSQ') return getBetConfig();
+        const playCode = (row && row.dataset.play) || kl8Play;
+        return getBetConfig(playCode);
+    }
+
+    /**
+     * 获取当前激活行的投注配置。
+     * @returns {{redCount, blueCount, maxRed, maxBlue, playCode}}
+     */
+    function getActiveRowConfig() {
+        return getRowConfig(getRowElement(activeRow));
+    }
+
     function addBetRow() {
         const rows = document.querySelectorAll('.bet-row-wrap');
         const idx = rows.length;
         const cfg = getBetConfig();
-        /* 每行新增 data-locked 属性标记锁定状态，默认未锁定 */
-        let html = '<div class="bet-row-wrap" data-row="' + idx + '" data-locked="false" onclick="setActive(' + idx + ')">';
-        html += '<span class="bet-row-num">第' + (idx+1) + '注</span>';
+        /* 每行新增 data-locked 和 data-play 属性，行标签展示玩法名称 */
+        const playLabel = (type === 'KL8')
+            ? ' [' + (KL8_STYLES.find(x => x.code === kl8Play) || KL8_STYLES[9]).name + ']'
+            : '';
+        let html = '<div class="bet-row-wrap" data-row="' + idx + '" data-locked="false" data-play="' + (type === 'KL8' ? kl8Play : '') + '" onclick="setActive(' + idx + ')">';
+        html += '<span class="bet-row-num">第' + (idx+1) + '注' + playLabel + '</span>';
         for (let i = 0; i < cfg.redCount; i++) {
             html += '<input class="form-control bet-inp" type="number" min="1" max="' + cfg.maxRed
                  + '" placeholder="' + (cfg.blueCount?'红':'号') + '" onfocus="setActive(' + idx + ')" oninput="syncBetUI()">';
@@ -499,7 +528,12 @@
             if (lockBtn) {
                 lockBtn.setAttribute('onclick', 'event.stopPropagation();toggleRowLock(' + i + ')');
             }
-            r.querySelector('.bet-row-num').textContent = '第' + (i + 1) + '注';
+            /* 行标签：保留该行玩法名称，仅更新注序号 */
+            const playCode = r.dataset.play;
+            const playName = (type === 'KL8' && playCode)
+                ? ' [' + ((KL8_STYLES.find(x => x.code === playCode) || KL8_STYLES[9]).name) + ']'
+                : '';
+            r.querySelector('.bet-row-num').textContent = '第' + (i + 1) + '注' + playName;
             /* 同步更新行级点击切换与输入框的 onfocus 属性 */
             r.setAttribute('onclick', 'setActive(' + i + ')');
             r.querySelectorAll('input').forEach(inp => {
@@ -527,7 +561,7 @@
     function randomActiveBet() {
         /* 当前行已锁定时禁止随机填充 */
         if (isActiveRowLocked()) { showToast('🔒 本注已锁定，请先解锁'); return; }
-        const cfg = getBetConfig();
+        const cfg = getActiveRowConfig();
         const reds = randomNums(cfg.redCount, cfg.maxRed);
         if (cfg.blueCount) reds.push(randomNums(1, cfg.maxBlue)[0]);
         fillActiveRow(reds);
@@ -536,7 +570,7 @@
     // ==================== 投注选号网格 ====================
     function renderBetGrid() {
         const container = document.getElementById('betSelectorGrid');
-        const cfg = getBetConfig();
+        const cfg = getActiveRowConfig();
         if (type === 'SSQ') {
             container.innerHTML =
                 '<div class="small text-danger fw-bold mb-1">🔴 红球 1-33（点击填入当前注）</div>'
@@ -561,11 +595,11 @@
      */
     function sortRowNumbers(row) {
         if (!row) return;
-        const cfg = getBetConfig();
+        const cfg = getRowConfig(row);
         const inputs = row.querySelectorAll('input');
         if (!inputs.length) return;
 
-        /* 主号码输入框数量：双色球为 6（红球），快乐八为玩法选号数 */
+        /* 主号码输入框数量：双色球为 6（红球），快乐八为该行玩法选号数 */
         const mainCount = cfg.blueCount ? cfg.redCount : inputs.length;
 
         /* 收集所有非空主号码值 */
@@ -589,7 +623,8 @@
         if (isActiveRowLocked()) { showToast('🔒 本注已锁定，请先解锁'); return; }
         const inputs = getActiveInputs();
         if (!inputs.length) return;
-        const cfg = getBetConfig();
+        const cfg = getActiveRowConfig();
+
         if (isBlue) {
             // 蓝球单选
             const blueIdx = cfg.redCount;
@@ -623,58 +658,18 @@
 
     /** 同步网格高亮 */
     function syncBetUI() {
+        const cfg = getActiveRowConfig();
         if (type === 'SSQ') {
             /* 双色球：同步红球网格高亮（前 6 个输入框） */
             syncGridHighlight('betRedGrid', 'r', ()=>getActiveInputs(), 0, 6);
             /* 双色球：同步蓝球网格高亮（第 7 个输入框，即蓝球） */
             syncGridHighlight('betBlueGrid', 'b', ()=>getActiveInputs(), 6, 1);
         } else {
-            /* 快乐八：同步号码网格高亮（输入框数量 = 当前玩法的选号数） */
-            syncGridHighlight('betKl8Grid', 'k', ()=>getActiveInputs(), 0, getBetConfig().redCount);
+            /* 快乐八：同步号码网格高亮（输入框数量 = 当前行的玩法选号数） */
+            syncGridHighlight('betKl8Grid', 'k', ()=>getActiveInputs(), 0, cfg.redCount);
         }
         /* 当前行未锁定时用户修改了输入 → 上一次的命中高亮已过时，自动清除 */
         if (!isActiveRowLocked()) clearBetHighlights();
-    }
-
-    // ==================== 锁定 / 解锁 ====================
-    /**
-     * 切换投注锁定状态。
-     * 锁定后：所有投注输入框置灰不可编辑、选号网格和操作按钮隐藏。
-     * 解锁后：恢复编辑能力，同时清除旧的命中高亮（结果已过期）。
-     */
-    function toggleLock() {
-        betLocked = !betLocked;
-        const btn = document.getElementById('lockBtn');
-        const rows = document.querySelectorAll('.bet-row-wrap');
-        const actions = document.getElementById('betActions');
-        const grid = document.getElementById('betSelectorGrid');
-
-        if (betLocked) {
-            /* 锁定 */
-            btn.innerHTML = '🔒';
-            btn.title = '投注已锁定，点击解锁';
-            btn.classList.add('locked');
-            rows.forEach(row => {
-                /* 锁定前将主号码按从小到大排列，保持整洁有序 */
-                sortRowNumbers(row);
-                row.classList.add('locked');
-                row.querySelectorAll('input').forEach(inp => inp.disabled = true);
-            });
-            if (actions) actions.style.display = 'none';
-            if (grid) grid.style.display = 'none';
-        } else {
-            /* 解锁 */
-            btn.innerHTML = '🔓';
-            btn.title = '点击锁定投注';
-            btn.classList.remove('locked');
-            rows.forEach(row => {
-                row.classList.remove('locked');
-                row.querySelectorAll('input').forEach(inp => inp.disabled = false);
-            });
-            if (actions) actions.style.display = '';
-            if (grid) grid.style.display = '';
-            clearBetHighlights();
-        }
     }
 
     // ==================== 行级锁定 / 解锁 ====================
@@ -733,7 +728,8 @@
         rows.forEach((row, i) => {
             if (i >= results.length) return;
             const inputs = row.querySelectorAll('input');
-            const cfg = getBetConfig();
+            /* 每行使用自己的玩法配置，而非全局统一配置 */
+            const cfg = getRowConfig(row);
             /* 用 Set 加速查找 */
             const drawSet = new Set(drawRed);
 
@@ -915,7 +911,9 @@
                 ['六等奖','蓝球命中（红球 0~2个），固定 5元']
             ].map(r=>'<tr><td class="fw-bold">'+r[0]+'</td><td>'+r[1]+'</td></tr>').join('');
         } else {
-            const s = KL8_STYLES.find(x=>x.code===kl8Play) || KL8_STYLES[9];
+            /* 快乐八：按当前激活行的玩法显示对应奖级表 */
+            const cfg = getActiveRowConfig();
+            const s = KL8_STYLES.find(x => x.code === cfg.playCode) || KL8_STYLES[9];
             tbody.innerHTML = s.tiers.map(t =>
                 '<tr><td class="fw-bold">'+t.level+'</td><td>'
                 + (t.m===0 ? '0 中（保底）' : '中 '+t.m+' 个')
@@ -927,22 +925,21 @@
     // ==================== 玩法切换 ====================
     function switchPlay(code) {
         if (kl8Play === code) return;
+        /* 仅修改全局默认玩法，不清空已有投注行。
+           已锁定行保持原玩法不动；新添加的行将使用此默认玩法。 */
         kl8Play = code;
-        /* 切换玩法 → 清空重建所有投注行 */
-        document.getElementById('betRows').innerHTML = '';
-        activeRow = 0;
-        addBetRow();
-        renderAll();
+        renderKl8PlayBar();
+        renderBetGrid();
+        renderRules();
     }
 
     function switchType(t) {
         if (type === t) return;
-        /* 切换彩种 → 强制解锁 */
-        if (betLocked) toggleLock();
         type = t;
         kl8Play = 'x10';
         drawRed = []; drawBlue = null;
         activeRow = 0;
+
         document.getElementById('tabSsq').classList.toggle('active', t==='SSQ');
         document.getElementById('tabKl8').classList.toggle('active', t==='KL8');
         document.getElementById('drawSsq').style.display = t==='SSQ' ? '' : 'none';
@@ -964,8 +961,9 @@
 
         // 收集投注
         const rows = document.querySelectorAll('.bet-row-wrap');
-        const cfg = getBetConfig();
         const bets = [];
+        /* 记录每注对应的原始行号与玩法代码，确保结果展示序号正确 */
+        const rowMeta = [];   // { rowIndex, playCode }
         for (const row of rows) {
             const inputs = row.querySelectorAll('input');
             const bet = [];
@@ -973,13 +971,25 @@
                 const v = parseInt(inputs[i].value);
                 if (!isNaN(v)) bet.push(v);
             }
-            if (bet.length > 0) bets.push(bet);
+            /* 空行也保留占位，避免结果序号错位（如第 3 行为空则结果不跳过它） */
+            bets.push(bet);
+            rowMeta.push({
+                rowIndex: parseInt(row.dataset.row),
+                playCode: type === 'KL8' ? (row.dataset.play || kl8Play) : null
+            });
         }
-        if (!bets.length) { alert('请至少输入一注有效号码'); return; }
+        if (!bets.some(b => b.length > 0)) { alert('请至少输入一注有效号码'); return; }
 
         // 计算
         const results = [];
-        for (const bet of bets) {
+        for (let bi = 0; bi < bets.length; bi++) {
+            const bet = bets[bi];
+            /* 空注跳过计算，结果中标记为"未投注" */
+            if (bet.length === 0) {
+                results.push({ bet:[], redMatch:0, blueMatch:false, level:'未投注', amount:'---', desc:'未输入号码', won:false });
+                continue;
+            }
+
             if (type === 'SSQ') {
                 // 双色球
                 const betReds = bet.slice(0, 6);
@@ -999,10 +1009,11 @@
 
                 results.push({ bet, redMatch, blueMatch, level, amount, desc, won:level!=='未中奖' });
             } else {
-                // 快乐八
+                // 快乐八：按该行记录的玩法代码查找对应奖级表
                 let match = 0;
                 for (const n of bet) { if (drawRed.includes(n)) match++; }
-                const style = KL8_STYLES.find(x=>x.code===kl8Play) || KL8_STYLES[9];
+                const playCode = rowMeta[bi].playCode || kl8Play;
+                const style = KL8_STYLES.find(x => x.code === playCode) || KL8_STYLES[9];
                 let found = false, level='未中奖', amount='---', desc='';
                 for (const tier of style.tiers) {
                     if (tier.m === match) {
@@ -1022,8 +1033,14 @@
         let html = '<div class="section-title">🏆 中奖结果</div>';
         results.forEach((r, i) => {
             const cls = r.won ? ' win' : '';
+            /* 使用原始行号，避免空行导致序号错位 */
+            const displayIdx = rowMeta[i].rowIndex + 1;
+            /* 快乐八多玩法时，展示每注对应的玩法名称 */
+            const playTag = (type === 'KL8' && r.level !== '未投注')
+                ? ' [' + ((KL8_STYLES.find(x => x.code === rowMeta[i].playCode) || KL8_STYLES[9]).name) + ']'
+                : '';
             html += '<div class="result-line' + cls + '">';
-            html += '<strong>第' + (i+1) + '注：</strong>投注 [' + r.bet.join(' ') + ']';
+            html += '<strong>第' + displayIdx + '注' + playTag + '：</strong>投注 [' + r.bet.join(' ') + ']';
             html += '<br>命中 <span class="' + (r.won?'text-danger fw-bold':'text-secondary') + '">'
                  + r.redMatch + '</span> 个'
                  + (type==='SSQ' ? (r.blueMatch ? ' | 蓝球 ✅' : ' | 蓝球 ❌') : '');
